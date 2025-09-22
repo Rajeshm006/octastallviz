@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Path to Knowledge: Footstep Walk</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    html, body { background: #181c23; margin: 0; padding: 0; width: 100vw; height: 100vh; font-family: 'Arial Rounded MT', Arial, sans-serif;}
+    main { width: 100vw; min-height: 100vh; display: flex; flex-direction: column; align-items: center;}
+    h1 { margin: 18px 0 12px 0; text-align: center; font-size: 2rem; }
+    #add-btn { font-size: 1.1rem; font-weight: bold; background: #34d399; color: #162534; border: none; border-radius: 7px; padding: 12px 28px; margin-bottom: 14px; box-shadow: 0 2px 10px #0003; cursor: pointer; transition: background .18s;}
+    #add-btn:active { background: #059669; }
+    #visitor-label { color: #ededed; margin-bottom: 0.8em; font-size: 1.13em;}
+    #visitor-count { font-weight: bold; color: #81e6d9; }
+    #p5-container { flex: 0 0 auto; }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/p5@1.9.2/lib/p5.min.js"></script>
+</head>
+<body>
+  <main>
+    <h1>Path to Knowledge</h1>
+    <button id="add-btn">New Walker</button>
+    <div id="visitor-label">Walkers: <span id="visitor-count">0</span></div>
+    <div id="p5-container"></div>
+  </main>
+<script>
+let footsteps = [];
+let started = false;
+let footColors = ['#81e6d9','#fbbf24','#f87171','#a78bfa','#34d399','#f472b6','#fdba74','#38bdf8'];
+let visitorCount = 0;
+// --- FIXED canvas size! ---
+const CANVAS_W = 1200;
+const CANVAS_H = 600;
+const FOOT_SCALE = 0.83;
+const margin = 36;
+
+class WalkingPair {
+  constructor(col) {
+    this.color = col;
+    this.x = random(margin, CANVAS_W-margin);
+    this.y = random(CANVAS_H*0.7, CANVAS_H-margin);
+    this.angle = random(-PI/5, PI/5);
+    this.turnVel = 0;
+    this.time = 0;
+    this.footsteps = [];
+    this.stepLen = 52 + random(-2, 6);
+    this.footOffset = 22;
+    this.isLeft = true;
+    this.stepInterval = 19;
+    this.maxStamp = 40;
+    this.velNoiseSeed = random(1000);
+    this.fadeFrames = 54;
+    this.done = false;
+    this.strideHz = 1.06 + random(0.12);
+    this.swayPx = 17 + random(5,9);
+    this.baseSpeed = 2.17 + random(0.23);
+    this.turnSigma = 0.34 + random(0.09);
+    this.turnKappa = 1.24 + random(0.32);
+  }
+  update() {
+    if (this.done) return;
+    this.time++;
+    // Ornstein-Uhlenbeck
+    let dt = 1/56;
+    this.turnVel += (-this.turnKappa * this.turnVel) * dt + this.turnSigma * Math.sqrt(dt) * randomGaussian();
+    this.angle += this.turnVel * dt;
+    // Cadence stride
+    let tsec = this.time/56.0;
+    let pulse = 0.5 * (1 - Math.cos(TWO_PI * this.strideHz * tsec));
+    let walkSpeed = this.baseSpeed * (0.81 + 0.17 * pulse);
+    this.x += Math.cos(this.angle) * walkSpeed;
+    this.y += Math.sin(this.angle) * walkSpeed;
+    // Sway for each step
+    let side = Math.sin(TWO_PI * this.strideHz * tsec);
+    let ox = -Math.sin(this.angle) * this.swayPx * side;
+    let oy =  Math.cos(this.angle) * this.swayPx * side;
+    // Bounce in bounds
+    if (this.x <= margin || this.x >= CANVAS_W-margin) {
+      this.angle = PI - this.angle + random(-0.16,0.16);
+      this.x = constrain(this.x, margin, CANVAS_W-margin);
+    }
+    if (this.y <= margin || this.y >= CANVAS_H-margin) {
+      this.angle = -this.angle + random(-0.16,0.16);
+      this.y = constrain(this.y, margin, CANVAS_H-margin);
+    }
+    // Drop a footstep every stride
+    if (this.time % this.stepInterval === 1 && this.footsteps.length < this.maxStamp) {
+      let fx = this.x + (this.isLeft?-1:1)*this.footOffset*Math.cos(this.angle+PI/2) + ox;
+      let fy = this.y + (this.isLeft?-1:1)*this.footOffset*Math.sin(this.angle+PI/2) + oy;
+      this.footsteps.push({ x: fx, y: fy, angle: this.angle, isLeft: this.isLeft, born: frameCount });
+      this.isLeft = !this.isLeft;
+    }
+    if (this.footsteps.length >= this.maxStamp) this.done = true;
+  }
+  draw() {
+    this.footsteps = this.footsteps.filter(foot => frameCount - foot.born < this.fadeFrames);
+    for (let foot of this.footsteps) {
+      let age = frameCount - foot.born;
+      let op = (1.0 - age / this.fadeFrames);
+      let displayAlpha = 148 * Math.pow(op, 1.6);
+      let shadowAlpha = 10 * Math.pow(op, 1.1);
+      drawSVGFoot(foot.x, foot.y, foot.angle, this.color, displayAlpha, foot.isLeft, shadowAlpha);
+    }
+  }
+}
+
+function drawSVGFoot(x, y, ang, col, opac, isLeft, shadowAlpha) {
+  push();
+  translate(x, y);
+  rotate(ang + (isLeft?0.07:-0.07));
+  scale(isLeft?FOOT_SCALE:-FOOT_SCALE, FOOT_SCALE);
+  drawingContext.shadowColor = col;
+  drawingContext.shadowBlur = shadowAlpha || 8;
+  fill(col + hex(Math.floor(opac),2));
+  stroke(255,255,255,80); strokeWeight(0.082);
+  beginShape();
+  vertex(13.27,15.97); bezierVertex(10.91,16.41,8.81,16.8,5.752,17.42);
+  bezierVertex(4.93,13.727,3.604,13.753,3.113,10.888);
+  bezierVertex(2.453,7.032,4.789,2.632,7.786,2.089);
+  bezierVertex(10.408,1.613,12.579,3.008,13.338,7.442);
+  bezierVertex(13.841,10.373,12.542,10.762,13.27,15.97); endShape(CLOSE);
+  beginShape(); vertex(6.029,18.894); vertex(13.507,17.452); vertex(13.952,20.052);
+  bezierVertex(14.244,21.755,13.139,23.38,11.483,23.68);
+  vertex(9.984,23.952); bezierVertex(8.329,24.252,6.75,23.115,6.459,21.411); endShape(CLOSE);
+  beginShape(); vertex(26.247,23.42); bezierVertex(23.571,22.926,20.731,22.397,18.729,22.024);
+  bezierVertex(19.458,16.817,18.159,16.427,18.661,13.496);
+  bezierVertex(19.421,9.062,21.591,7.667,24.213,8.143);
+  bezierVertex(27.21,8.687,29.546,13.086,28.886,16.942);
+  bezierVertex(28.396,19.807,27.069,19.833,26.247,23.42); endShape(CLOSE);
+  beginShape(); vertex(18.047,26.052); vertex(18.492,23.452); vertex(25.97,24.894);
+  vertex(25.539,27.411); bezierVertex(25.247,29.115,23.669,30.252,22.013,29.952);
+  vertex(20.514,29.68); bezierVertex(18.859,29.38,17.754,27.755,18.047,26.052); endShape(CLOSE);
+  pop();
+  drawingContext.shadowBlur = 0;
+}
+
+function setup() {
+  let cnv = createCanvas(CANVAS_W, CANVAS_H);
+  cnv.parent('p5-container');
+  frameRate(56);
+  noStroke();
+}
+
+function draw() {
+  background(24, 28, 34, 248);
+  if (!started) return;
+  footsteps.forEach(f => { f.update(); f.draw(); });
+  document.getElementById('visitor-count').textContent = footsteps.length;
+}
+
+document.getElementById('add-btn').onclick = () => {
+  started = true;
+  let c = footColors[visitorCount % footColors.length];
+  footsteps.push(new WalkingPair(c));
+  visitorCount++;
+  document.getElementById('visitor-count').textContent = footsteps.length;
+};
+</script>
+</body>
+</html>
